@@ -1,0 +1,192 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trivia Challenge</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #0f172a;
+  color: white;
+  font-family: Arial, sans-serif;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.game {
+  width: 100%;
+  max-width: 600px;
+  background: #1e293b;
+  padding: 32px;
+  border-radius: 18px;
+}
+h1 { text-align: center; }
+.meta {
+  display: flex;
+  justify-content: space-between;
+  color: #94a3b8;
+  margin: 25px 0;
+}
+#question {
+  font-size: 24px;
+  line-height: 1.4;
+}
+.answers {
+  display: grid;
+  gap: 12px;
+  margin: 25px 0;
+}
+button, select {
+  padding: 15px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 16px;
+}
+button { cursor: pointer; }
+.answer {
+  background: #334155;
+  color: white;
+  text-align: left;
+}
+.answer:hover:not(:disabled) { background: #475569; }
+.answer.correct { background: #15803d; }
+.answer.wrong { background: #b91c1c; }
+#next, #start {
+  background: #38bdf8;
+  color: #082f49;
+  font-weight: bold;
+  width: 100%;
+}
+#next { display: none; }
+select { width: 100%; margin: 12px 0; }
+#status { color: #cbd5e1; text-align: center; }
+</style>
+</head>
+<body>
+<main class="game">
+  <h1>🧠 Trivia Challenge</h1>
+  <div id="setup">
+    <p>Choose your difficulty:</p>
+    <select id="difficulty">
+      <option value="">Any difficulty</option>
+      <option value="easy">Easy</option>
+      <option value="medium">Medium</option>
+      <option value="hard">Hard</option>
+    </select>
+    <button id="start">Start Quiz</button>
+  </div>
+  <div id="quiz" hidden>
+    <div class="meta">
+      <span id="progress"></span>
+      <span id="score"></span>
+    </div>
+    <h2 id="question"></h2>
+    <div class="answers" id="answers"></div>
+    <button id="next">Next Question →</button>
+  </div>
+  <p id="status"></p>
+</main>
+<script>
+const setup = document.getElementById("setup");
+const quiz = document.getElementById("quiz");
+const status = document.getElementById("status");
+const next = document.getElementById("next");
+
+let questions = [];
+let current = 0;
+let points = 0;
+
+function decode(text) {
+  const el = document.createElement("textarea");
+  el.innerHTML = text;
+  return el.value;
+}
+
+document.getElementById("start").onclick = async () => {
+  const difficulty = document.getElementById("difficulty").value;
+  const url = "https://opentdb.com/api.php?amount=10&type=multiple"
+    + (difficulty ? "&difficulty=" + difficulty : "");
+
+  status.textContent = "Loading questions...";
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("API unavailable");
+    const data = await response.json();
+    if (data.response_code !== 0) {
+      throw new Error("No questions available. Try again shortly.");
+    }
+    questions = data.results;
+    current = 0;
+    points = 0;
+    setup.hidden = true;
+    quiz.hidden = false;
+    status.textContent = "";
+    showQuestion();
+  } catch (error) {
+    status.textContent = error.message;
+  }
+};
+
+function showQuestion() {
+  const q = questions[current];
+  document.getElementById("progress").textContent =
+    `Question ${current + 1} / ${questions.length}`;
+  document.getElementById("score").textContent =
+    `Score: ${points}`;
+  document.getElementById("question").textContent =
+    decode(q.question);
+
+  const answers = document.getElementById("answers");
+  answers.replaceChildren();
+  next.style.display = "none";
+
+  const choices = [
+    ...q.incorrect_answers,
+    q.correct_answer
+  ].sort(() => Math.random() - 0.5);
+
+  choices.forEach(choice => {
+    const button = document.createElement("button");
+    button.className = "answer";
+    button.textContent = decode(choice);
+    button.onclick = () => {
+      const correct = choice === q.correct_answer;
+      if (correct) points++;
+
+      document.querySelectorAll(".answer").forEach(b => {
+        b.disabled = true;
+        if (b.textContent === decode(q.correct_answer)) {
+          b.classList.add("correct");
+        } else if (b === button && !correct) {
+          b.classList.add("wrong");
+        }
+      });
+
+      document.getElementById("score").textContent =
+        `Score: ${points}`;
+      next.style.display = "block";
+      next.textContent = current === questions.length - 1
+        ? "See Results" : "Next Question →";
+    };
+    answers.appendChild(button);
+  });
+}
+
+next.onclick = () => {
+  current++;
+  if (current < questions.length) {
+    showQuestion();
+  } else {
+    quiz.hidden = true;
+    setup.hidden = false;
+    status.textContent =
+      `Quiz finished! You scored ${points} out of ${questions.length}.`;
+  }
+};
+</script>
+</body>
+</html>
