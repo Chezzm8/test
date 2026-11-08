@@ -4,9 +4,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Trivia Challenge</title>
+<title>Quizutmaningen</title>
 <style>
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   min-height: 100vh;
@@ -47,6 +48,7 @@ button, select {
   font-size: 16px;
 }
 button { cursor: pointer; }
+button:disabled { cursor: default; }
 .answer {
   background: #334155;
   color: white;
@@ -68,17 +70,19 @@ select { width: 100%; margin: 12px 0; }
 </head>
 <body>
 <main class="game">
-  <h1>🧠 Trivia Challenge</h1>
+  <h1>🧠 Quizutmaningen</h1>
+
   <div id="setup">
-    <p>Choose your difficulty:</p>
+    <p>Välj svårighetsgrad:</p>
     <select id="difficulty">
-      <option value="">Any difficulty</option>
-      <option value="easy">Easy</option>
-      <option value="medium">Medium</option>
-      <option value="hard">Hard</option>
+      <option value="">Alla svårighetsgrader</option>
+      <option value="easy">Lätt</option>
+      <option value="medium">Medel</option>
+      <option value="hard">Svår</option>
     </select>
-    <button id="start">Start Quiz</button>
+    <button id="start">Starta quiz</button>
   </div>
+
   <div id="quiz" hidden>
     <div class="meta">
       <span id="progress"></span>
@@ -86,53 +90,33 @@ select { width: 100%; margin: 12px 0; }
     </div>
     <h2 id="question"></h2>
     <div class="answers" id="answers"></div>
-    <button id="next">Next Question →</button>
+    <button id="next">Nästa fråga →</button>
   </div>
-  <p id="status"></p>
+
+  <p id="status" role="status"></p>
 </main>
+
 <script>
 const setup = document.getElementById("setup");
 const quiz = document.getElementById("quiz");
 const status = document.getElementById("status");
 const next = document.getElementById("next");
+const start = document.getElementById("start");
+const answers = document.getElementById("answers");
+const questionElement = document.getElementById("question");
 
 let questions = [];
 let current = 0;
 let points = 0;
+let quizVersion = 0;
+
+const translationCache = new Map();
 
 function decode(text) {
   const el = document.createElement("textarea");
   el.innerHTML = text;
   return el.value;
 }
-
-document.getElementById("start").onclick = async () => {
-  const difficulty = document.getElementById("difficulty").value;
-  const url = "https://opentdb.com/api.php?amount=10&type=multiple"
-    + (difficulty ? "&difficulty=" + difficulty : "");
-
-  status.textContent = "Loading questions...";
-  try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error("API unavailable");
-    const data = await response.json();
-    if (data.response_code !== 0) {
-      throw new Error("No questions available. Try again shortly.");
-    }
-    questions = data.results;
-    current = 0;
-    points = 0;
-    setup.hidden = true;
-    quiz.hidden = false;
-    status.textContent = "";
-    showQuestion();
-  } catch (error) {
-    status.textContent = error.message;
-  }
-};
-
-
-const translationCache = new Map();
 
 async function translate(text) {
   const original = decode(text);
@@ -151,14 +135,14 @@ async function translate(text) {
   );
 
   if (!response.ok) {
-    throw new Error("Översättningen misslyckades");
+    throw new Error("Översättningstjänsten svarar inte.");
   }
 
   const data = await response.json();
 
   if (Number(data.responseStatus) !== 200 ||
       !data.responseData?.translatedText) {
-    throw new Error("Översättningen misslyckades");
+    throw new Error("Översättningen misslyckades.");
   }
 
   const result = decode(data.responseData.translatedText);
@@ -166,103 +150,127 @@ async function translate(text) {
   return result;
 }
 
+function shuffle(items) {
+  const result = [...items];
+
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+
+  return result;
+}
+
+start.onclick = async () => {
+  const difficulty = document.getElementById("difficulty").value;
+
+  const url =
+    "https://opentdb.com/api.php?amount=10&type=multiple" +
+    (difficulty ? "&difficulty=" + difficulty : "");
+
+  start.disabled = true;
+  status.textContent = "Laddar frågor...";
+
+  try {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error("Kunde inte hämta frågor.");
+    }
+
+    const data = await response.json();
+
+    if (data.response_code !== 0 || !data.results?.length) {
+      throw new Error(
+        "Inga frågor tillgängliga. Försök igen om en stund."
+      );
+    }
+
+    questions = data.results;
+    current = 0;
+    points = 0;
+    quizVersion++;
+
+    setup.hidden = true;
+    quiz.hidden = false;
+    status.textContent = "";
+
+    await showQuestion();
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    start.disabled = false;
+  }
+};
+
 async function showQuestion() {
+  const version = quizVersion;
+  const questionIndex = current;
   const q = questions[current];
-  const questionElement = document.getElementById("question");
-  const answers = document.getElementById("answers");
 
   document.getElementById("progress").textContent =
     `Fråga ${current + 1} av ${questions.length}`;
+
   document.getElementById("score").textContent =
     `Poäng: ${points}`;
 
   questionElement.textContent = "Översätter fråga...";
   answers.replaceChildren();
   next.style.display = "none";
-
-  try {
-    const choices = [
-      ...q.incorrect_answers,
-      q.correct_answer
-    ];
-
-    const translated = await Promise.all([
-      translate(q.question),
-      ...choices.map(translate)
-    ]);
-
-    questionElement.textContent = translated[0];
-
-    const shuffled = choices.map((choice, i) => ({
-      original: choice,
-      translated: translated[i + 1]
-    })).sort(() => Math.random() - 0.5);
-
-    shuffled.forEach(choice => {
-      const button = document.createElement("button");
-      button.className = "answer";
-      button.textContent = choice.translated;
-
-      button.onclick = () => {
-        const correct = choice.original === q.correct_answer;
-        if (correct) points++;
-
-        document.querySelectorAll(".answer").forEach(b => {
-          b.disabled = true;
-        });
-
-        shuffled.forEach((item, i) => {
-          const b = answers.children[i];
-          if (item.original === q.correct_answer) {
-            b.classList.add("correct");
-          } else if (b === button) {
-            b.classList.add("wrong");
-          }
-        });
-
-        document.getElementById("score").textContent =
-          `Poäng: ${points}`;
-        next.style.display = "block";
-        next.textContent = current === questions.length - 1
-          ? "Visa resultat" : "Nästa fråga →";
-      };
-
-      answers.appendChild(button);
-    });
-  } catch (error) {
-    questionElement.textContent =
-      "Kunde inte översätta frågan. Försök igen senare.";
-  }
-}
-
-  const q = questions[current];
-  document.getElementById("progress").textContent =
-    `Question ${current + 1} / ${questions.length}`;
-  document.getElementById("score").textContent =
-    `Score: ${points}`;
-  document.getElementById("question").textContent =
-    decode(q.question);
-
-  const answers = document.getElementById("answers");
-  answers.replaceChildren();
-  next.style.display = "none";
+  status.textContent = "";
 
   const choices = [
     ...q.incorrect_answers,
     q.correct_answer
-  ].sort(() => Math.random() - 0.5);
+  ];
 
-  choices.forEach(choice => {
+  let translatedQuestion;
+  let translatedAnswers;
+
+  try {
+    const translated = await Promise.all([
+      translate(q.question),
+      ...choices.map(choice => translate(choice))
+    ]);
+
+    translatedQuestion = translated[0];
+    translatedAnswers = translated.slice(1);
+  } catch (error) {
+    if (version !== quizVersion || questionIndex !== current) return;
+
+    // Use English questions if the free translation API is unavailable.
+    translatedQuestion = decode(q.question);
+    translatedAnswers = choices.map(decode);
+
+    status.textContent =
+      "Översättning inte tillgänglig just nu. Visar originalfrågan.";
+  }
+
+  if (version !== quizVersion || questionIndex !== current) return;
+
+  questionElement.textContent = translatedQuestion;
+
+  const shuffled = shuffle(
+    choices.map((choice, index) => ({
+      original: choice,
+      translated: translatedAnswers[index]
+    }))
+  );
+
+  shuffled.forEach(choice => {
     const button = document.createElement("button");
     button.className = "answer";
-    button.textContent = decode(choice);
+    button.textContent = choice.translated;
+
     button.onclick = () => {
-      const correct = choice === q.correct_answer;
+      const correct = choice.original === q.correct_answer;
+
       if (correct) points++;
 
-      document.querySelectorAll(".answer").forEach(b => {
+      [...answers.children].forEach((b, index) => {
         b.disabled = true;
-        if (b.textContent === decode(q.correct_answer)) {
+
+        if (shuffled[index].original === q.correct_answer) {
           b.classList.add("correct");
         } else if (b === button && !correct) {
           b.classList.add("wrong");
@@ -270,24 +278,32 @@ async function showQuestion() {
       });
 
       document.getElementById("score").textContent =
-        `Score: ${points}`;
+        `Poäng: ${points}`;
+
       next.style.display = "block";
-      next.textContent = current === questions.length - 1
-        ? "See Results" : "Next Question →";
+
+      next.textContent =
+        current === questions.length - 1
+          ? "Visa resultat"
+          : "Nästa fråga →";
     };
+
     answers.appendChild(button);
   });
 }
 
-next.onclick = () => {
+next.onclick = async () => {
+  next.style.display = "none";
   current++;
+
   if (current < questions.length) {
-    showQuestion();
+    await showQuestion();
   } else {
     quiz.hidden = true;
     setup.hidden = false;
+
     status.textContent =
-      `Quiz finished! You scored ${points} out of ${questions.length}.`;
+      `Quizet är klart! Du fick ${points} av ${questions.length} rätt.`;
   }
 };
 </script>
